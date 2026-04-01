@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: crowddj-poc
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ADMIN_SECRET
+        value: crowddj-admin-2024
+      - key: PORT
+        value: 3000

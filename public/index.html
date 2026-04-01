@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrowdDJ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- TOP NAV -->
+    <nav class="topnav">
+      <span class="logo">🎵 CrowdDJ</span>
+      <div class="nav-tabs">
+        <button class="nav-tab active" id="tabCustomer" onclick="switchMode('customer')">Guest</button>
+        <button class="nav-tab" id="tabAdmin" onclick="switchMode('admin')">Business</button>
+      </div>
+    </nav>
+
+    <!-- ══════════════════ CUSTOMER MODE ══════════════════ -->
+    <div id="customerMode" class="mode active">
+
+      <!-- STEP 1: Genre Picker -->
+      <div id="screenVote" class="screen active">
+        <div class="screen-header">
+          <div id="sessionBadge" class="session-badge">● Session Live</div>
+          <h1>What do you want to hear?</h1>
+          <p class="subtitle">Pick <strong>3 genres</strong> and we'll blend the crowd's vibe</p>
+        </div>
+
+        <div id="genreGrid" class="genre-grid">
+          <!-- populated by JS -->
+        </div>
+
+        <div class="selected-count" id="selectedCount">0 / 3 selected</div>
+
+        <button class="btn-primary btn-large" id="submitVoteBtn" onclick="submitVote()" disabled>
+          Submit My Vote
+        </button>
+      </div>
+
+      <!-- STEP 2: Confirmation + Now Playing -->
+      <div id="screenNowPlaying" class="screen">
+        <div class="screen-header">
+          <div class="session-badge">● Now Playing</div>
+          <h1 id="npTitle">—</h1>
+          <p class="np-artist" id="npArtist">—</p>
+          <p class="np-genre" id="npGenre"></p>
+        </div>
+
+        <div class="crowd-vibe-card">
+          <div class="crowd-vibe-label">Crowd Vibe</div>
+          <div id="crowdMixBars" class="mix-bars">
+            <!-- populated by JS -->
+          </div>
+        </div>
+
+        <div class="skip-area">
+          <button class="btn-skip" id="skipBtn" onclick="submitSkip()">
+            👎 Skip this song
+          </button>
+          <div class="skip-info" id="skipInfo"></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="request-section">
+          <h3>Request a Song</h3>
+          <form id="requestForm" onsubmit="submitRequest(event)">
+            <input type="text" id="reqTitle" placeholder="Song title" required>
+            <input type="text" id="reqArtist" placeholder="Artist name" required>
+            <textarea id="reqReason" placeholder="Why? (optional)" rows="2"></textarea>
+            <button type="submit" class="btn-secondary">Submit Request</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════ ADMIN MODE ══════════════════════ -->
+    <div id="adminMode" class="mode">
+
+      <!-- Admin Login -->
+      <div id="screenAdminLogin" class="screen active">
+        <div class="login-wrap">
+          <div class="login-card">
+            <div class="login-icon">🎛️</div>
+            <h2>Business Login</h2>
+            <form onsubmit="adminLogin(event)">
+              <input type="password" id="adminPass" placeholder="Admin password" required>
+              <button type="submit" class="btn-primary">Login</button>
+            </form>
+            <div id="loginErr" class="err-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Admin Dashboard -->
+      <div id="screenAdminDash" class="screen">
+
+        <!-- Stat bar -->
+        <div class="stat-bar">
+          <div class="stat-item">
+            <span class="stat-val" id="statVoters">0</span>
+            <span class="stat-lbl">Voters</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-val" id="statVotes">0</span>
+            <span class="stat-lbl">Total Votes</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-val" id="statSession">—</span>
+            <span class="stat-lbl">Session</span>
+          </div>
+        </div>
+
+        <!-- Now Playing (admin) -->
+        <section class="admin-section">
+          <div class="section-row">
+            <h2>Now Playing</h2>
+            <button class="btn-sm" onclick="adminNextSong()">⏭ Next Song</button>
+          </div>
+          <div class="now-playing-row">
+            <div class="now-playing-info">
+              <div class="np-admin-title" id="adminNpTitle">—</div>
+              <div class="np-admin-artist" id="adminNpArtist">—</div>
+              <div class="np-admin-genre" id="adminNpGenre"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Crowd Mix -->
+        <section class="admin-section">
+          <h2>Live Crowd Mix</h2>
+          <div id="adminCrowdMix" class="admin-mix-list">
+            <div class="empty-state">No votes yet</div>
+          </div>
+          <div id="adminOutliers" class="outlier-row"></div>
+        </section>
+
+        <!-- Genre Controls -->
+        <section class="admin-section">
+          <h2>Genre Controls</h2>
+          <p class="section-hint">Toggle off to block genres from the session</p>
+          <div id="genreToggles" class="genre-toggles">
+            <!-- populated by JS -->
+          </div>
+          <button class="btn-secondary" onclick="saveBlockedGenres()">Save Genre Settings</button>
+        </section>
+
+        <!-- Song Requests -->
+        <section class="admin-section">
+          <div class="section-row">
+            <h2>Song Requests</h2>
+            <span class="badge" id="requestBadge">0</span>
+          </div>
+          <div id="requestsList" class="requests-list">
+            <div class="empty-state">No requests yet</div>
+          </div>
+        </section>
+
+        <!-- New Session -->
+        <section class="admin-section">
+          <h2>Start New Session</h2>
+          <form onsubmit="startSession(event)">
+            <input type="text" id="sessionName" placeholder="e.g. Friday Night — Main Floor" required>
+            <button type="submit" class="btn-primary">Start Session</button>
+          </form>
+        </section>
+
+        <!-- Manage Songs -->
+        <section class="admin-section">
+          <div class="section-row">
+            <h2>Manage Songs</h2>
+            <button class="btn-sm" onclick="toggleSongList()">Show / Hide</button>
+          </div>
+          <div id="addSongForm" class="add-song-form">
+            <input type="text" id="newTitle" placeholder="Song title">
+            <input type="text" id="newArtist" placeholder="Artist">
+            <input type="number" id="newDuration" placeholder="Duration (sec)" value="200">
+            <select id="newGenre">
+              <option value="">— Genre —</option>
+            </select>
+            <button class="btn-secondary" onclick="addSong()">Add Song</button>
+          </div>
+          <div id="songListContainer" style="display:none">
+            <div id="songList" class="song-list"></div>
+          </div>
+        </section>
+
+        <button class="btn-logout" onclick="adminLogout()">Logout</button>
+      </div>
+    </div>
+
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
