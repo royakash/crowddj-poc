@@ -168,16 +168,45 @@ function startCustomerPoll() {
 // ═══════════════════════════════════════════════════════════
 // ADMIN
 // ═══════════════════════════════════════════════════════════
+// function initAdmin() {
+//   if (adminToken) {
+//     showScreen('admin', 'screenAdminDash');
+//     loadAdminData();
+//      loadSpotifyPanel(); 
+//     pollTimer = setInterval(loadAdminData, 10000);
+//   } else {
+//     showScreen('admin', 'screenAdminLogin');
+//   }
+// }
 function initAdmin() {
+  const stored = localStorage.getItem('crowddj_admin_token');
+  if (stored) adminToken = stored;
+
   if (adminToken) {
     showScreen('admin', 'screenAdminDash');
     loadAdminData();
-     loadSpotifyPanel(); 
+    loadSpotifyPanel();
     pollTimer = setInterval(loadAdminData, 10000);
   } else {
     showScreen('admin', 'screenAdminLogin');
   }
 }
+
+// async function adminLogin(e) {
+//   e.preventDefault();
+//   const pass = document.getElementById('adminPass').value;
+//   try {
+//     const res = await apiFetch('/api/admin/login', 'POST', { password: pass });
+//     if (res.token) {
+//       adminToken = res.token;
+//       showScreen('admin', 'screenAdminDash');
+//       loadAdminData();
+//       pollTimer = setInterval(loadAdminData, 10000);
+//     }
+//   } catch (_) {
+//     document.getElementById('loginErr').textContent = 'Invalid password';
+//   }
+// }
 
 async function adminLogin(e) {
   e.preventDefault();
@@ -186,8 +215,10 @@ async function adminLogin(e) {
     const res = await apiFetch('/api/admin/login', 'POST', { password: pass });
     if (res.token) {
       adminToken = res.token;
+      localStorage.setItem('crowddj_admin_token', res.token);
       showScreen('admin', 'screenAdminDash');
       loadAdminData();
+      loadSpotifyPanel();
       pollTimer = setInterval(loadAdminData, 10000);
     }
   } catch (_) {
@@ -195,8 +226,15 @@ async function adminLogin(e) {
   }
 }
 
+// function adminLogout() {
+//   adminToken = null;
+//   clearInterval(pollTimer);
+//   showScreen('admin', 'screenAdminLogin');
+// }
+
 function adminLogout() {
   adminToken = null;
+  localStorage.removeItem('crowddj_admin_token');
   clearInterval(pollTimer);
   showScreen('admin', 'screenAdminLogin');
 }
@@ -434,12 +472,37 @@ window.addEventListener('DOMContentLoaded', () => {
 let spotifyDeviceId = null;
 let spotifyPlaylistId = null;
 
+// async function loadSpotifyPanel() {
+//   try {
+//     const status = await apiFetch('/api/spotify/status', 'GET', null, {}, true);
+//     renderSpotifyPanel(status);
+//   } catch (e) {
+//     console.error('Spotify panel load failed', e);
+//   }
+// }
+
 async function loadSpotifyPanel() {
+  const el = document.getElementById('spotifyPanel');
+  if (!el) return;
+
+  if (!adminToken) {
+    el.innerHTML = '<div class="empty-state">Login as admin first</div>';
+    return;
+  }
+
   try {
     const status = await apiFetch('/api/spotify/status', 'GET', null, {}, true);
     renderSpotifyPanel(status);
   } catch (e) {
-    console.error('Spotify panel load failed', e);
+    el.innerHTML = `
+      <div style="background:#2a1010;border:1px solid #ff5c6a;border-radius:10px;padding:16px;">
+        <div style="color:#ff5c6a;font-size:13px;font-weight:600;margin-bottom:8px">Spotify error</div>
+        <div style="color:#aaa;font-size:12px;font-family:monospace">${e.message}</div>
+        <div style="color:#666;font-size:11px;margin-top:8px">
+          Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are set in Render environment variables
+        </div>
+      </div>
+    `;
   }
 }
 
