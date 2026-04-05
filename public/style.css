@@ -387,3 +387,32 @@ body {
 .search-results { margin-top: 10px; }
 
 .spotify-actions { display: flex; flex-direction: column; gap: 8px; }
+
+.spotify-setup-box {
+  background: #0d1a0d;
+  border: 1px solid rgba(29,185,84,0.3);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.setup-step-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #1DB954;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.setup-hint {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.7;
+  margin-bottom: 4px;
+}
+.cred-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg2);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}

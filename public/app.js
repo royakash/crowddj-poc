@@ -561,37 +561,114 @@ function connectSpotify() {
 //   }
 // }
 
+
+
+async function saveSpotifyCredentials() {
+  const clientId     = document.getElementById('inputClientId')?.value?.trim();
+  const clientSecret = document.getElementById('inputClientSecret')?.value?.trim();
+
+  if (!clientId || !clientSecret) {
+    toast('Both Client ID and Client Secret are required');
+    return;
+  }
+
+  if (clientId.length < 20) {
+    toast('Client ID looks too short — double check it');
+    return;
+  }
+
+  try {
+    await apiFetch('/api/admin/spotify-credentials', 'POST', { clientId, clientSecret }, {}, true);
+    toast('✅ Credentials saved!');
+    loadSpotifyPanel();
+  } catch (e) {
+    toast('Failed to save credentials: ' + e.message);
+  }
+}
+
+async function resetSpotifyCredentials() {
+  try {
+    // Clear tokens first
+    await apiFetch('/api/spotify/disconnect', 'POST', {}, {}, true);
+    // Clear credentials from DB
+    await apiFetch('/api/admin/spotify-credentials', 'POST', 
+      { clientId: '', clientSecret: '' }, {}, true);
+    toast('Credentials cleared');
+    loadSpotifyPanel();
+  } catch (e) {
+    toast('Reset failed');
+  }
+}
+
+
 function renderSpotifyPanel(status) {
   const el = document.getElementById('spotifyPanel');
   if (!el) return;
 
+  // STEP 1 — No credentials yet, show setup form
+  if (!status.hasCredentials) {
+    el.innerHTML = `
+      <div class="spotify-setup-box">
+        <div class="setup-step-label">Step 1 of 2 — Enter your Spotify Developer credentials</div>
+        <p class="setup-hint">
+          Go to <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#1DB954">developer.spotify.com/dashboard</a>,
+          create an app, add <code style="font-size:11px;background:#1a1a2a;padding:2px 6px;border-radius:4px">${window.location.origin}/auth/spotify/callback</code>
+          as the Redirect URI, then paste your credentials below.
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:16px">
+          <div>
+            <label style="font-size:12px;color:#888;display:block;margin-bottom:4px">Client ID</label>
+            <input type="text" id="inputClientId" placeholder="e.g. 955f74b1781c469daff05dbda9f00700"
+                   style="width:100%;background:#1a1a24;border:1.5px solid rgba(255,255,255,0.1);border-radius:8px;padding:11px 14px;font-size:13px;color:#f0eeff;font-family:monospace">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#888;display:block;margin-bottom:4px">Client Secret</label>
+            <input type="password" id="inputClientSecret" placeholder="Your client secret"
+                   style="width:100%;background:#1a1a24;border:1.5px solid rgba(255,255,255,0.1);border-radius:8px;padding:11px 14px;font-size:13px;color:#f0eeff;font-family:monospace">
+          </div>
+          <button onclick="saveSpotifyCredentials()" class="btn-spotify" style="margin-top:4px">
+            Save Credentials
+          </button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // STEP 2 — Credentials saved, not yet connected to Spotify
   if (!status.connected) {
     el.innerHTML = `
       <div class="spotify-connect-box">
-        <div class="spotify-logo">
+        <div class="setup-step-label">Step 2 of 2 — Connect your Spotify account</div>
+        <div class="cred-preview-row">
+          <span style="font-size:12px;color:#888">Client ID:</span>
+          <code style="font-size:11px;color:#1DB954">${status.clientIdPreview}</code>
+          <button onclick="resetSpotifyCredentials()" class="btn-sm" style="margin-left:auto">Change</button>
+        </div>
+        <div class="spotify-logo" style="margin:20px 0 8px">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="#1DB954">
             <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
           </svg>
           Spotify
         </div>
-        <p style="font-size:13px;color:#888;margin:8px 0 16px;">Connect your Spotify account to fetch real playlists and control playback</p>
+        <p style="font-size:13px;color:#888;margin:0 0 16px">Credentials saved. Now connect your Spotify account to authorise CrowdDJ.</p>
         <button onclick="connectSpotify()" class="btn-spotify">Connect Spotify Account</button>
       </div>
     `;
     return;
   }
 
-  // Premium badge or warning
+  // STEP 3 — Fully connected
   const accountBadge = status.isPremium
-    ? `<span style="font-size:11px;background:rgba(29,185,84,0.2);color:#1DB954;padding:2px 8px;border-radius:10px;margin-left:8px">Premium</span>`
-    : `<span style="font-size:11px;background:rgba(255,193,64,0.2);color:#ffc940;padding:2px 8px;border-radius:10px;margin-left:8px">Free</span>`;
+    ? `<span style="font-size:11px;background:rgba(29,185,84,0.2);color:#1DB954;padding:2px 8px;border-radius:10px;margin-left:8px">Premium ✓</span>`
+    : `<span style="font-size:11px;background:rgba(255,193,64,0.2);color:#ffc940;padding:2px 8px;border-radius:10px;margin-left:8px">Free account</span>`;
 
   const premiumWarning = !status.isPremium ? `
-    <div style="background:#2a2010;border:1px solid #ffc940;border-radius:10px;padding:12px;margin-bottom:12px;">
-      <div style="color:#ffc940;font-size:13px;font-weight:600;margin-bottom:4px">Free Spotify Account</div>
+    <div style="background:#2a2010;border:1px solid #ffc940;border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="color:#ffc940;font-size:13px;font-weight:600;margin-bottom:4px">Free Spotify Account Detected</div>
       <div style="color:#aaa;font-size:12px;line-height:1.6">
-        Playlist viewing, search and playlist creation work fine.<br>
-        Playback control and song recommendations require Spotify Premium.
+        Playlist viewing and search work fine.<br>
+        Playback control and recommendations require Spotify Premium.
       </div>
     </div>
   ` : '';
@@ -600,15 +677,17 @@ function renderSpotifyPanel(status) {
     <div class="spotify-connected-box">
       <div class="spotify-user-row">
         <div class="spotify-dot"></div>
-        <span style="font-size:14px;font-weight:600;">
-          ${status.userName} ${accountBadge}
-        </span>
+        <span style="font-size:14px;font-weight:600">${status.userName} ${accountBadge}</span>
         <button onclick="disconnectSpotify()" class="btn-sm" style="margin-left:auto">Disconnect</button>
+      </div>
+      <div class="cred-preview-row" style="margin-top:8px">
+        <span style="font-size:11px;color:#555">Client ID: ${status.clientIdPreview}</span>
+        <button onclick="resetSpotifyCredentials()" class="btn-sm" style="margin-left:auto;font-size:10px">Change credentials</button>
       </div>
 
       ${premiumWarning}
 
-      <div class="spotify-actions">
+      <div class="spotify-actions" style="margin-top:12px">
         <button onclick="loadSpotifyPlaylists()" class="btn-secondary" style="margin-bottom:10px">
           📋 Load My Playlists
         </button>
@@ -617,7 +696,7 @@ function renderSpotifyPanel(status) {
             🎯 Generate Crowd Playlist from Votes
           </button>
         ` : `
-          <button class="btn-spotify-action" style="opacity:0.4;cursor:not-allowed" disabled title="Requires Spotify Premium">
+          <button class="btn-spotify-action" style="opacity:0.4;cursor:not-allowed" disabled>
             🎯 Generate Crowd Playlist — Requires Premium
           </button>
         `}
@@ -628,14 +707,13 @@ function renderSpotifyPanel(status) {
       <div id="spotifyPlayback" class="spotify-playback"></div>
       <div class="spotify-search-area" style="margin-top:12px">
         <input type="text" id="spotifySearchInput" placeholder="Search Spotify catalog..."
-               style="background:#1a1a24;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 14px;font-size:13px;color:#f0eeff;width:100%">
+               style="width:100%;background:#1a1a24;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 14px;font-size:13px;color:#f0eeff">
         <button onclick="searchSpotify()" class="btn-secondary" style="margin-top:8px">Search</button>
         <div id="spotifySearchResults" class="search-results"></div>
       </div>
     </div>
   `;
 
-  // Only load devices if Premium
   if (status.isPremium) loadSpotifyDevices();
 }
 

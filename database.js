@@ -41,16 +41,18 @@ class Database {
 
     // Sessions (one active session per business at a time)
     await this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        is_active BOOLEAN DEFAULT 1,
-        allow_explicit BOOLEAN DEFAULT 0,
-        blocked_genres TEXT DEFAULT '[]',
-        current_song_id TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT 1,
+    allow_explicit BOOLEAN DEFAULT 0,
+    blocked_genres TEXT DEFAULT '[]',
+    current_song_id TEXT,
+    spotify_client_id TEXT,
+    spotify_client_secret TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
     // Genre votes (one row per session_id + genre — upserted on re-vote)
     await this.db.exec(`
@@ -392,6 +394,24 @@ class Database {
       [JSON.stringify(blockedGenres), sessionId]
     );
   }
+
+  async saveSpotifyCredentials(sessionId, clientId, clientSecret) {
+  return this.db.run(
+    'UPDATE sessions SET spotify_client_id = ?, spotify_client_secret = ? WHERE id = ?',
+    [clientId, clientSecret, sessionId]
+  );
+}
+
+async getSpotifyCredentials(sessionId) {
+  const row = await this.db.get(
+    'SELECT spotify_client_id, spotify_client_secret FROM sessions WHERE id = ?',
+    [sessionId]
+  );
+  return {
+    clientId:     row?.spotify_client_id     || process.env.SPOTIFY_CLIENT_ID,
+    clientSecret: row?.spotify_client_secret || process.env.SPOTIFY_CLIENT_SECRET
+  };
+}
 }
 
 export default Database;

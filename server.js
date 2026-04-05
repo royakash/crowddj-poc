@@ -16,12 +16,10 @@ import {
   createPlaylist,
   addTracksToPlaylist,
   removeTracksFromPlaylist,
-  replacePlaylistTracks,
   searchTracks,
   getRecommendations,
   getPlaybackState,
   getDevices,
-  transferPlayback,
   startPlayback,
   skipToNext,
   pausePlayback,
@@ -61,6 +59,26 @@ const adminAuth = (req, res, next) => {
   res.status(401).json({ error: 'Unauthorized' });
 };
 
+// ── Get valid Spotify token, refresh if needed ────────────
+async function getValidToken(sessionId) {
+  const stored = getTokens(sessionId);
+  if (!stored) throw new Error('Not connected to Spotify');
+
+  if (isTokenExpired(stored)) {
+    const { clientId, clientSecret } = await db.getSpotifyCredentials(sessionId);
+    const refreshed = await refreshAccessToken(
+      stored.refreshToken,
+      clientId,
+      clientSecret
+    );
+    const updated = { ...stored, ...refreshed };
+    saveTokens(sessionId, updated);
+    return updated.accessToken;
+  }
+
+  return stored.accessToken;
+}
+
 // ═══════════════════════════════════════════════════════════
 // CUSTOMER ROUTES
 // ═══════════════════════════════════════════════════════════
@@ -71,8 +89,8 @@ app.get('/api/session', async (req, res) => {
     const session = await db.getActiveSession();
     if (!session) return res.status(404).json({ error: 'No active session' });
 
-    const genres = await db.getAllGenres();
-    const blockedGenres = JSON.parse(session.blocked_genres || '[]');
+    const genres         = await db.getAllGenres();
+    const blockedGenres  = JSON.parse(session.blocked_genres || '[]');
     const availableGenres = genres.filter(g => !blockedGenres.includes(g.id));
     const { mix, outliers } = await db.computeCrowdMix(session.id);
 
@@ -94,13 +112,13 @@ app.get('/api/vote-status', async (req, res) => {
     const voterUuid = req.headers['x-voter-uuid'];
     if (!voterUuid) return res.json({ hasVoted: false });
     const session = await db.getActiveSession();
-    if (!session) return res.json({ hasVoted: false });
+    if (!session)  return res.json({ hasVoted: false });
     const hasVoted = await db.hasVoterVoted(session.id, voterUuid);
     res.json({ hasVoted });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Submit genre votes (customer picks 3 genres)
+// Submit genre votes (customer picks up to 3 genres)
 app.post('/api/vote', async (req, res) => {
   try {
     const voterUuid = getVoterUuid(req);
@@ -124,8 +142,10 @@ app.post('/api/vote', async (req, res) => {
 app.post('/api/skip', async (req, res) => {
   try {
     const voterUuid = getVoterUuid(req);
-    const session = await db.getActiveSession();
-    if (!session || !session.current_song_id) return res.status(404).json({ error: 'No active song' });
+    const session   = await db.getActiveSession();
+    if (!session || !session.current_song_id) {
+      return res.status(404).json({ error: 'No active song' });
+    }
 
     const result = await db.submitSkipVote(session.id, voterUuid, session.current_song_id);
 
@@ -139,12 +159,14 @@ app.post('/api/skip', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Crowd mix (polling endpoint)
+// Live crowd mix polling endpoint
 app.get('/api/crowd', async (req, res) => {
   try {
     const session = await db.getActiveSession();
     if (!session) return res.status(404).json({ error: 'No active session' });
+
     const { ranked, mix, outliers } = await db.computeCrowdMix(session.id);
+
     let currentSong = null;
     if (session.current_song_id) {
       currentSong = await db.db.get(
@@ -152,6 +174,7 @@ app.get('/api/crowd', async (req, res) => {
         [session.current_song_id]
       );
     }
+
     res.json({ ranked, mix, outliers, currentSong });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -161,9 +184,14 @@ app.post('/api/request-song', async (req, res) => {
   try {
     const voterUuid = getVoterUuid(req);
     const { songTitle, artistName, reason } = req.body;
-    if (!songTitle || !artistName) return res.status(400).json({ error: 'Title and artist required' });
+
+    if (!songTitle || !artistName) {
+      return res.status(400).json({ error: 'Title and artist required' });
+    }
+
     const session = await db.getActiveSession();
     if (!session) return res.status(404).json({ error: 'No active session' });
+
     const id = await db.addSongRequest(session.id, voterUuid, songTitle, artistName, reason);
     res.json({ success: true, id });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -173,13 +201,14 @@ app.post('/api/request-song', async (req, res) => {
 // ADMIN ROUTES
 // ═══════════════════════════════════════════════════════════
 
+// Admin login
 app.post('/api/admin/login', (req, res) => {
   const { password } = req.body;
   if (password === ADMIN_SECRET) return res.json({ token: ADMIN_SECRET });
   res.status(401).json({ error: 'Invalid password' });
 });
 
-// Full analytics
+// Full session analytics
 app.get('/api/admin/analytics', adminAuth, async (req, res) => {
   try {
     const session = await db.getActiveSession();
@@ -189,7 +218,7 @@ app.get('/api/admin/analytics', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Start new session
+// Start a new session
 app.post('/api/admin/session', adminAuth, async (req, res) => {
   try {
     const { name, blockedGenres, allowExplicit } = req.body;
@@ -199,7 +228,7 @@ app.post('/api/admin/session', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Manually advance to next song
+// Advance to next song manually
 app.post('/api/admin/next-song', adminAuth, async (req, res) => {
   try {
     const session = await db.getActiveSession();
@@ -215,46 +244,54 @@ app.post('/api/admin/blocked-genres', adminAuth, async (req, res) => {
   try {
     const { blockedGenres } = req.body;
     const session = await db.getActiveSession();
-    if (!session) return res.status(404).json({ error: 'No session' });
+    if (!session) return res.status(404).json({ error: 'No active session' });
     await db.updateBlockedGenres(session.id, blockedGenres || []);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Song requests
+// Get all song requests
 app.get('/api/admin/requests', adminAuth, async (req, res) => {
   try {
     const session = await db.getActiveSession();
-    if (!session) return res.status(404).json({ error: 'No session' });
+    if (!session) return res.status(404).json({ error: 'No active session' });
     const requests = await db.getAllSongRequests(session.id);
     res.json(requests);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Approve or reject a song request
 app.post('/api/admin/request/:id', adminAuth, async (req, res) => {
   try {
     const { action } = req.body;
-    if (!['approve','reject'].includes(action)) return res.status(400).json({ error: 'Invalid action' });
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action' });
+    }
     await db.updateRequestStatus(req.params.id, action);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// All songs list (admin)
+// Get all songs
 app.get('/api/admin/songs', adminAuth, async (req, res) => {
-  try { res.json(await db.getAllSongs()); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    res.json(await db.getAllSongs());
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Add a song
 app.post('/api/admin/songs', adminAuth, async (req, res) => {
   try {
     const { title, artist, duration, genreId } = req.body;
-    if (!title || !artist || !genreId) return res.status(400).json({ error: 'Title, artist and genre required' });
+    if (!title || !artist || !genreId) {
+      return res.status(400).json({ error: 'Title, artist and genre required' });
+    }
     const id = await db.addSong(title, artist, parseInt(duration) || 180, genreId);
     res.json({ success: true, id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Remove a song
 app.delete('/api/admin/songs/:id', adminAuth, async (req, res) => {
   try {
     await db.removeSong(req.params.id);
@@ -262,122 +299,146 @@ app.delete('/api/admin/songs/:id', adminAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════
+// SPOTIFY CREDENTIALS ROUTES
+// ═══════════════════════════════════════════════════════════
 
-//Block for Spotify integration
+// Save Spotify credentials entered by admin in the UI
+app.post('/api/admin/spotify-credentials', adminAuth, async (req, res) => {
+  try {
+    const { clientId, clientSecret } = req.body;
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({ error: 'Client ID and Client Secret are required' });
+    }
+    const session = await db.getActiveSession();
+    if (!session) return res.status(404).json({ error: 'No active session' });
+    await db.saveSpotifyCredentials(session.id, clientId.trim(), clientSecret.trim());
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-// ── Middleware: get valid Spotify token for this session ──
-async function getValidToken(sessionId) {
-  const stored = getTokens(sessionId);
-  if (!stored) throw new Error('Not connected to Spotify');
-
-  if (isTokenExpired(stored)) {
-    const refreshed = await refreshAccessToken(stored.refreshToken);
-    const updated = { ...stored, ...refreshed };
-    saveTokens(sessionId, updated);
-    return updated.accessToken;
-  }
-
-  return stored.accessToken;
-}
+// Get saved credentials (masked for display)
+app.get('/api/admin/spotify-credentials', adminAuth, async (req, res) => {
+  try {
+    const session = await db.getActiveSession();
+    if (!session) return res.status(404).json({ error: 'No active session' });
+    const creds = await db.getSpotifyCredentials(session.id);
+    res.json({
+      hasClientId:     !!creds.clientId,
+      hasClientSecret: !!creds.clientSecret,
+      clientIdPreview: creds.clientId
+        ? creds.clientId.substring(0, 8) + '••••••••••••••••••••••••'
+        : null
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ═══════════════════════════════════════════════════════════
 // SPOTIFY AUTH ROUTES
 // ═══════════════════════════════════════════════════════════
 
-// Step 1: Admin clicks "Connect Spotify" → redirect to Spotify login
-// app.get('/auth/spotify', (req, res) => {
-//   const state = crypto.randomUUID(); // CSRF protection
-//   const url = getAuthUrl(state);
-//   res.redirect(url);
-// });
-
-app.get('/auth/spotify', (req, res) => {
+// Step 1 — Redirect to Spotify login using session's own credentials
+app.get('/auth/spotify', async (req, res) => {
   const token = req.query.token;
   if (token !== ADMIN_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  const state = crypto.randomUUID();
-  const url = getAuthUrl(state);
-  res.redirect(url);
-});
-
-// Step 2: Spotify redirects back here with a code
-app.get('/auth/spotify/callback', async (req, res) => {
-  const { code, error } = req.query;
-
-  if (error) {
-    return res.redirect('/?mode=admin&spotify=denied');
-  }
 
   try {
-    const tokens = await exchangeCodeForTokens(code);
-    const user   = await getSpotifyUser(tokens.accessToken);
-
     const session = await db.getActiveSession();
     if (!session) return res.redirect('/?mode=admin&spotify=no-session');
 
-    saveTokens(session.id, {
-      ...tokens,
-      spotifyUserId:   user.id,
-      spotifyUserName: user.display_name,
-      spotifyEmail:    user.email
-    });
+    const { clientId } = await db.getSpotifyCredentials(session.id);
+    if (!clientId) return res.redirect('/?mode=admin&spotify=no-credentials');
 
-    res.redirect('/?mode=admin&spotify=connected');
+    const state = crypto.randomUUID();
+    const url   = getAuthUrl(clientId, state);
+    res.redirect(url);
   } catch (e) {
-    console.error('Spotify callback error:', e);
+    console.error('Auth init error:', e.message);
     res.redirect('/?mode=admin&spotify=error');
   }
 });
 
-// Check Spotify connection status
-// app.get('/api/spotify/status', adminAuth, async (req, res) => {
-//   try {
-//     const session = await db.getActiveSession();
-//     const tokens  = getTokens(session?.id);
+// Step 2 — Spotify redirects back here with auth code
+app.get('/auth/spotify/callback', async (req, res) => {
+  const { code, error } = req.query;
 
-//     if (!tokens) return res.json({ connected: false });
+  console.log('Spotify callback received:', { hasCode: !!code, error });
 
-//     res.json({
-//       connected:    true,
-//       userName:     tokens.spotifyUserName,
-//       email:        tokens.spotifyEmail,
-//       tokenExpired: isTokenExpired(tokens)
-//     });
-//   } catch (e) {
-//     res.json({ connected: false });
-//   }
-// });
+  if (error || !code) {
+    console.log('OAuth denied or no code:', error);
+    return res.redirect('/?mode=admin&spotify=denied');
+  }
 
-app.get('/api/spotify/status', adminAuth, async (req, res) => {
   try {
     const session = await db.getActiveSession();
-    const tokens  = getTokens(session?.id);
+    if (!session) return res.redirect('/?mode=admin&spotify=no-session');
 
-    if (!tokens) return res.json({ connected: false });
+    const { clientId, clientSecret } = await db.getSpotifyCredentials(session.id);
+    if (!clientId || !clientSecret) {
+      return res.redirect('/?mode=admin&spotify=no-credentials');
+    }
 
-    // Check if user has Premium
-    const accessToken = await getValidToken(session.id);
-    const user = await getSpotifyUser(accessToken);
-    const isPremium = user.product === 'premium';
+    console.log('Exchanging code for tokens...');
+    const tokens = await exchangeCodeForTokens(code, clientId, clientSecret);
 
-    res.json({
-      connected:    true,
-      userName:     tokens.spotifyUserName,
-      email:        tokens.spotifyEmail,
-      tokenExpired: isTokenExpired(tokens),
-      isPremium
+    console.log('Fetching Spotify user profile...');
+    const user = await getSpotifyUser(tokens.accessToken);
+
+    console.log(`Connected: ${user.display_name} | Product: ${user.product}`);
+
+    saveTokens(session.id, {
+      ...tokens,
+      clientId,
+      clientSecret,
+      spotifyUserId:   user.id,
+      spotifyUserName: user.display_name,
+      spotifyEmail:    user.email,
+      isPremium:       user.product === 'premium'
     });
+
+    res.redirect('/?mode=admin&spotify=connected');
   } catch (e) {
-    res.json({ connected: false });
+    console.error('Spotify callback error:', e.message, e.stack);
+    res.redirect(`/?mode=admin&spotify=error&reason=${encodeURIComponent(e.message)}`);
   }
 });
 
-// Disconnect Spotify
+// ═══════════════════════════════════════════════════════════
+// SPOTIFY STATUS & MANAGEMENT ROUTES
+// ═══════════════════════════════════════════════════════════
+
+// Connection status + credential info
+app.get('/api/spotify/status', adminAuth, async (req, res) => {
+  try {
+    const session = await db.getActiveSession();
+    const creds   = await db.getSpotifyCredentials(session?.id);
+    const tokens  = getTokens(session?.id);
+
+    res.json({
+      connected:       !!tokens,
+      hasCredentials:  !!(creds.clientId && creds.clientSecret),
+      clientIdPreview: creds.clientId
+        ? creds.clientId.substring(0, 8) + '••••••••••••••••••••••••'
+        : null,
+      userName:     tokens?.spotifyUserName || null,
+      email:        tokens?.spotifyEmail    || null,
+      isPremium:    tokens?.isPremium       || false,
+      tokenExpired: tokens ? isTokenExpired(tokens) : false
+    });
+  } catch (e) {
+    res.json({ connected: false, hasCredentials: false });
+  }
+});
+
+// Disconnect Spotify (clear tokens, keep credentials)
 app.post('/api/spotify/disconnect', adminAuth, async (req, res) => {
-  const session = await db.getActiveSession();
-  if (session) clearTokens(session.id);
-  res.json({ success: true });
+  try {
+    const session = await db.getActiveSession();
+    if (session) clearTokens(session.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -391,51 +452,48 @@ app.get('/api/spotify/playlists', adminAuth, async (req, res) => {
     const accessToken = await getValidToken(session.id);
     const playlists   = await getUserPlaylists(accessToken);
     res.json(playlists);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Get tracks in a specific Spotify playlist
+// Get tracks in a specific playlist
 app.get('/api/spotify/playlists/:playlistId/tracks', adminAuth, async (req, res) => {
   try {
     const session     = await db.getActiveSession();
     const accessToken = await getValidToken(session.id);
     const tracks      = await getPlaylistTracks(accessToken, req.params.playlistId);
     res.json(tracks);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Create a new CrowdDJ playlist in Spotify
+// Create a new playlist in Spotify
 app.post('/api/spotify/playlists', adminAuth, async (req, res) => {
   try {
     const { name, description } = req.body;
     const session     = await db.getActiveSession();
     const tokens      = getTokens(session.id);
     const accessToken = await getValidToken(session.id);
-    const playlist    = await createPlaylist(accessToken, tokens.spotifyUserId, name || 'CrowdDJ Mix', description || 'Generated by CrowdDJ');
+    const playlist    = await createPlaylist(
+      accessToken,
+      tokens.spotifyUserId,
+      name || 'CrowdDJ Mix',
+      description || 'Generated by CrowdDJ'
+    );
     res.json({ success: true, playlist });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Add a track to a Spotify playlist
+// Add tracks to a playlist
 app.post('/api/spotify/playlists/:playlistId/tracks', adminAuth, async (req, res) => {
   try {
-    const { trackUris } = req.body; // array of spotify:track:xxx
+    const { trackUris } = req.body;
     const session       = await db.getActiveSession();
     const accessToken   = await getValidToken(session.id);
     await addTracksToPlaylist(accessToken, req.params.playlistId, trackUris);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Remove a track from a Spotify playlist
+// Remove tracks from a playlist
 app.delete('/api/spotify/playlists/:playlistId/tracks', adminAuth, async (req, res) => {
   try {
     const { trackUris } = req.body;
@@ -443,9 +501,7 @@ app.delete('/api/spotify/playlists/:playlistId/tracks', adminAuth, async (req, r
     const accessToken   = await getValidToken(session.id);
     await removeTracksFromPlaylist(accessToken, req.params.playlistId, trackUris);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Search Spotify catalog
@@ -457,34 +513,26 @@ app.get('/api/spotify/search', adminAuth, async (req, res) => {
     const accessToken = await getValidToken(session.id);
     const results     = await searchTracks(accessToken, q, parseInt(limit) || 10);
     res.json(results);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// THE KEY ENDPOINT: Generate crowd-driven playlist from genre votes
-// This is what CrowdDJ is — crowd votes → genre mix → Spotify recommendations
+// Generate crowd-driven playlist from genre votes
 app.post('/api/spotify/generate-crowd-playlist', adminAuth, async (req, res) => {
   try {
     const session     = await db.getActiveSession();
     const accessToken = await getValidToken(session.id);
     const tokens      = getTokens(session.id);
 
-    // Get the live crowd mix
     const { mix } = await db.computeCrowdMix(session.id);
-
     if (!mix || mix.length === 0) {
-      return res.status(400).json({ error: 'No crowd votes yet' });
+      return res.status(400).json({ error: 'No crowd votes yet — wait for customers to vote' });
     }
 
-    // Get recommendations from Spotify based on genre mix
     const tracks = await getRecommendations(accessToken, mix, 30);
-
     if (tracks.length === 0) {
       return res.status(500).json({ error: 'Could not get Spotify recommendations' });
     }
 
-    // Create or update a CrowdDJ playlist
     const playlistName = `CrowdDJ — ${session.name}`;
     const playlist = await createPlaylist(
       accessToken,
@@ -493,27 +541,20 @@ app.post('/api/spotify/generate-crowd-playlist', adminAuth, async (req, res) => 
       `Generated by CrowdDJ. Top genres: ${mix.map(m => m.name).join(', ')}`
     );
 
-    // Add all recommended tracks to the playlist
-    await addTracksToPlaylist(
-      accessToken,
-      playlist.id,
-      tracks.map(t => t.uri)
-    );
+    await addTracksToPlaylist(accessToken, playlist.id, tracks.map(t => t.uri));
 
     res.json({
       success:    true,
       playlist:   { id: playlist.id, name: playlistName, uri: playlist.uri },
       trackCount: tracks.length,
       mix,
-      tracks:     tracks.slice(0, 10) // return first 10 as preview
+      tracks:     tracks.slice(0, 10)
     });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════════════════════
-// SPOTIFY PLAYBACK ROUTES (Premium required)
+// SPOTIFY PLAYBACK ROUTES (Spotify Premium required)
 // ═══════════════════════════════════════════════════════════
 
 // Get available devices
@@ -523,9 +564,7 @@ app.get('/api/spotify/devices', adminAuth, async (req, res) => {
     const accessToken = await getValidToken(session.id);
     const devices     = await getDevices(accessToken);
     res.json(devices);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Get current playback state
@@ -535,12 +574,10 @@ app.get('/api/spotify/playback', adminAuth, async (req, res) => {
     const accessToken = await getValidToken(session.id);
     const state       = await getPlaybackState(accessToken);
     res.json(state || { is_playing: false });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Start playback (play a playlist URI on a device)
+// Start playback
 app.post('/api/spotify/play', adminAuth, async (req, res) => {
   try {
     const { deviceId, playlistUri, trackUris } = req.body;
@@ -548,12 +585,10 @@ app.post('/api/spotify/play', adminAuth, async (req, res) => {
     const accessToken = await getValidToken(session.id);
     await startPlayback(accessToken, deviceId, playlistUri, trackUris);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Skip song
+// Skip to next track
 app.post('/api/spotify/next', adminAuth, async (req, res) => {
   try {
     const { deviceId } = req.body;
@@ -561,12 +596,10 @@ app.post('/api/spotify/next', adminAuth, async (req, res) => {
     const accessToken  = await getValidToken(session.id);
     await skipToNext(accessToken, deviceId);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Pause
+// Pause playback
 app.post('/api/spotify/pause', adminAuth, async (req, res) => {
   try {
     const { deviceId } = req.body;
@@ -574,15 +607,13 @@ app.post('/api/spotify/pause', adminAuth, async (req, res) => {
     const accessToken  = await getValidToken(session.id);
     await pausePlayback(accessToken, deviceId);
     res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-
-
+// ── Start server ───────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`\n🎵 CrowdDJ running → http://localhost:${PORT}`);
-  console.log(`📊 Admin dashboard → http://localhost:${PORT}?mode=admin`);
-  console.log(`🎧 Customer portal → http://localhost:${PORT}\n`);
+  console.log(`\n🎵 CrowdDJ running     → http://localhost:${PORT}`);
+  console.log(`📊 Admin dashboard     → http://localhost:${PORT}?mode=admin`);
+  console.log(`🎧 Customer portal     → http://localhost:${PORT}`);
+  console.log(`🔑 Admin password      → ${ADMIN_SECRET}\n`);
 });
