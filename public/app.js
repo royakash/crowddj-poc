@@ -506,6 +506,11 @@ async function loadSpotifyPanel() {
   }
 }
 
+function connectSpotify() {
+  // Pass token as query param so server can verify before redirecting to Spotify
+  window.location.href = `/auth/spotify?token=${encodeURIComponent(adminToken)}`;
+}
+
 function renderSpotifyPanel(status) {
   const el = document.getElementById('spotifyPanel');
   if (!el) return;
@@ -520,7 +525,7 @@ function renderSpotifyPanel(status) {
           Spotify
         </div>
         <p style="font-size:13px;color:#888;margin:8px 0 16px;">Connect your Spotify account to fetch real playlists and control playback</p>
-        <a href="/auth/spotify" class="btn-spotify">Connect Spotify Account</a>
+        <button onclick="connectSpotify()" class="btn-spotify">Connect Spotify Account</button>
       </div>
     `;
   } else {

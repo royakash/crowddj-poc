@@ -285,8 +285,18 @@ async function getValidToken(sessionId) {
 // ═══════════════════════════════════════════════════════════
 
 // Step 1: Admin clicks "Connect Spotify" → redirect to Spotify login
-app.get('/auth/spotify', adminAuth, (req, res) => {
-  const state = crypto.randomUUID(); // CSRF protection
+// app.get('/auth/spotify', (req, res) => {
+//   const state = crypto.randomUUID(); // CSRF protection
+//   const url = getAuthUrl(state);
+//   res.redirect(url);
+// });
+
+app.get('/auth/spotify', (req, res) => {
+  const token = req.query.token;
+  if (token !== ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const state = crypto.randomUUID();
   const url = getAuthUrl(state);
   res.redirect(url);
 });
