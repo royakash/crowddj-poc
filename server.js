@@ -331,6 +331,24 @@ app.get('/auth/spotify/callback', async (req, res) => {
 });
 
 // Check Spotify connection status
+// app.get('/api/spotify/status', adminAuth, async (req, res) => {
+//   try {
+//     const session = await db.getActiveSession();
+//     const tokens  = getTokens(session?.id);
+
+//     if (!tokens) return res.json({ connected: false });
+
+//     res.json({
+//       connected:    true,
+//       userName:     tokens.spotifyUserName,
+//       email:        tokens.spotifyEmail,
+//       tokenExpired: isTokenExpired(tokens)
+//     });
+//   } catch (e) {
+//     res.json({ connected: false });
+//   }
+// });
+
 app.get('/api/spotify/status', adminAuth, async (req, res) => {
   try {
     const session = await db.getActiveSession();
@@ -338,11 +356,17 @@ app.get('/api/spotify/status', adminAuth, async (req, res) => {
 
     if (!tokens) return res.json({ connected: false });
 
+    // Check if user has Premium
+    const accessToken = await getValidToken(session.id);
+    const user = await getSpotifyUser(accessToken);
+    const isPremium = user.product === 'premium';
+
     res.json({
       connected:    true,
       userName:     tokens.spotifyUserName,
       email:        tokens.spotifyEmail,
-      tokenExpired: isTokenExpired(tokens)
+      tokenExpired: isTokenExpired(tokens),
+      isPremium
     });
   } catch (e) {
     res.json({ connected: false });
