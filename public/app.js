@@ -172,6 +172,7 @@ function initAdmin() {
   if (adminToken) {
     showScreen('admin', 'screenAdminDash');
     loadAdminData();
+     loadSpotifyPanel(); 
     pollTimer = setInterval(loadAdminData, 10000);
   } else {
     showScreen('admin', 'screenAdminLogin');
@@ -424,3 +425,236 @@ window.addEventListener('DOMContentLoaded', () => {
   const mode = new URLSearchParams(window.location.search).get('mode') || 'customer';
   switchMode(mode);
 });
+
+
+// ═══════════════════════════════════════════════════════════
+// SPOTIFY INTEGRATION (admin only)
+// ═══════════════════════════════════════════════════════════
+
+let spotifyDeviceId = null;
+let spotifyPlaylistId = null;
+
+async function loadSpotifyPanel() {
+  try {
+    const status = await apiFetch('/api/spotify/status', 'GET', null, {}, true);
+    renderSpotifyPanel(status);
+  } catch (e) {
+    console.error('Spotify panel load failed', e);
+  }
+}
+
+function renderSpotifyPanel(status) {
+  const el = document.getElementById('spotifyPanel');
+  if (!el) return;
+
+  if (!status.connected) {
+    el.innerHTML = `
+      <div class="spotify-connect-box">
+        <div class="spotify-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#1DB954">
+            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+          </svg>
+          Spotify
+        </div>
+        <p style="font-size:13px;color:#888;margin:8px 0 16px;">Connect your Spotify account to fetch real playlists and control playback</p>
+        <a href="/auth/spotify" class="btn-spotify">Connect Spotify Account</a>
+      </div>
+    `;
+  } else {
+    el.innerHTML = `
+      <div class="spotify-connected-box">
+        <div class="spotify-user-row">
+          <div class="spotify-dot"></div>
+          <span style="font-size:14px;font-weight:600;">Connected: ${status.userName}</span>
+          <button onclick="disconnectSpotify()" class="btn-sm" style="margin-left:auto">Disconnect</button>
+        </div>
+
+        <div class="spotify-actions">
+          <button onclick="loadSpotifyPlaylists()" class="btn-secondary" style="margin-bottom:10px">
+            📋 Load My Playlists
+          </button>
+          <button onclick="generateCrowdPlaylist()" class="btn-spotify-action">
+            🎯 Generate Crowd Playlist from Votes
+          </button>
+        </div>
+
+        <div id="spotifyPlaylists" class="spotify-playlists"></div>
+        <div id="spotifyDevices" class="spotify-devices"></div>
+        <div id="spotifyPlayback" class="spotify-playback"></div>
+        <div id="spotifySearch" class="spotify-search-area">
+          <input type="text" id="spotifySearchInput" placeholder="Search Spotify catalog..." 
+                 style="background:#1a1a24;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 14px;font-size:13px;color:#f0eeff;width:100%;margin-top:12px">
+          <button onclick="searchSpotify()" class="btn-secondary" style="margin-top:8px">Search</button>
+          <div id="spotifySearchResults" class="search-results"></div>
+        </div>
+      </div>
+    `;
+    loadSpotifyDevices();
+  }
+}
+
+async function loadSpotifyPlaylists() {
+  try {
+    const playlists = await apiFetch('/api/spotify/playlists', 'GET', null, {}, true);
+    const el = document.getElementById('spotifyPlaylists');
+    if (playlists.length === 0) {
+      el.innerHTML = '<div class="empty-state">No playlists found</div>';
+      return;
+    }
+    el.innerHTML = `
+      <h4 style="font-size:13px;color:#888;margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.5px">Your Playlists</h4>
+      ${playlists.map(p => `
+        <div class="spotify-playlist-row">
+          ${p.imageUrl ? `<img src="${p.imageUrl}" style="width:40px;height:40px;border-radius:4px;object-fit:cover">` : '<div style="width:40px;height:40px;border-radius:4px;background:#2a2a3a"></div>'}
+          <div style="flex:1;margin-left:10px">
+            <div style="font-size:13px;font-weight:600">${p.name}</div>
+            <div style="font-size:11px;color:#666">${p.trackCount} tracks</div>
+          </div>
+          <button onclick="loadPlaylistTracks('${p.id}', '${p.name.replace(/'/g, '')}')" class="btn-sm">View</button>
+          <button onclick="playSpotifyPlaylist('spotify:playlist:${p.id}')" class="btn-sm" style="margin-left:6px">▶ Play</button>
+        </div>
+      `).join('')}
+    `;
+  } catch (e) {
+    toast('Failed to load playlists');
+  }
+}
+
+async function loadPlaylistTracks(playlistId, playlistName) {
+  try {
+    const tracks = await apiFetch(`/api/spotify/playlists/${playlistId}/tracks`, 'GET', null, {}, true);
+    const el = document.getElementById('spotifyPlaylists');
+    const tracksHtml = tracks.map(t => `
+      <div class="spotify-track-row">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600">${t.title}</div>
+          <div style="font-size:11px;color:#666">${t.artist}</div>
+        </div>
+        <button onclick="addToSpotifyQueue('${t.uri}')" class="btn-sm">+ Queue</button>
+      </div>
+    `).join('');
+
+    el.innerHTML += `
+      <h4 style="font-size:13px;color:#888;margin:16px 0 10px">${playlistName}</h4>
+      <div style="max-height:300px;overflow-y:auto">${tracksHtml}</div>
+    `;
+  } catch (e) {
+    toast('Failed to load tracks');
+  }
+}
+
+async function generateCrowdPlaylist() {
+  toast('Generating crowd playlist from votes...');
+  try {
+    const res = await apiFetch('/api/spotify/generate-crowd-playlist', 'POST', {}, {}, true);
+    if (res.success) {
+      spotifyPlaylistId = res.playlist.id;
+      toast(`✅ Playlist created: ${res.trackCount} tracks`);
+
+      const el = document.getElementById('spotifyPlayback');
+      el.innerHTML = `
+        <div class="crowd-playlist-card">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Crowd Playlist Ready</div>
+          <div style="font-size:11px;color:#888;margin-bottom:12px">${res.trackCount} tracks · Mix: ${res.mix.map(m => m.name + ' ' + m.pct + '%').join(' · ')}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${res.tracks.slice(0, 5).map(t => `
+              <div style="font-size:11px;background:#1a1a2a;padding:4px 8px;border-radius:4px;color:#888">${t.title}</div>
+            `).join('')}
+          </div>
+          <button onclick="playSpotifyPlaylist('${res.playlist.uri}')" class="btn-spotify-action" style="margin-top:12px">
+            ▶ Play This Playlist Now
+          </button>
+        </div>
+      `;
+    }
+  } catch (e) {
+    toast('Failed to generate playlist — do you have crowd votes yet?');
+  }
+}
+
+async function loadSpotifyDevices() {
+  try {
+    const devices = await apiFetch('/api/spotify/devices', 'GET', null, {}, true);
+    const el = document.getElementById('spotifyDevices');
+    if (!devices || devices.length === 0) {
+      el.innerHTML = '<div style="font-size:12px;color:#555;margin-top:12px">No Spotify devices found — open Spotify on your phone or computer first</div>';
+      return;
+    }
+    el.innerHTML = `
+      <h4 style="font-size:13px;color:#888;margin:16px 0 10px;text-transform:uppercase;letter-spacing:0.5px">Devices</h4>
+      ${devices.map(d => `
+        <div class="spotify-device-row ${d.is_active ? 'active-device' : ''}" onclick="selectDevice('${d.id}', this)">
+          <span style="font-size:12px">${d.type === 'Computer' ? '💻' : d.type === 'Smartphone' ? '📱' : '🔊'}</span>
+          <span style="font-size:13px;font-weight:${d.is_active ? '600' : '400'}">${d.name}</span>
+          ${d.is_active ? '<span style="font-size:11px;color:#1DB954;margin-left:auto">Active</span>' : ''}
+        </div>
+      `).join('')}
+    `;
+    // Auto-select active device
+    const active = devices.find(d => d.is_active);
+    if (active) spotifyDeviceId = active.id;
+  } catch (e) {
+    console.error('Device load failed', e);
+  }
+}
+
+function selectDevice(deviceId, el) {
+  spotifyDeviceId = deviceId;
+  document.querySelectorAll('.spotify-device-row').forEach(r => r.classList.remove('active-device'));
+  el.classList.add('active-device');
+  toast('Device selected');
+}
+
+async function playSpotifyPlaylist(playlistUri) {
+  try {
+    await apiFetch('/api/spotify/play', 'POST', { deviceId: spotifyDeviceId, playlistUri }, {}, true);
+    toast('▶ Playing on Spotify!');
+  } catch (e) {
+    toast('Playback failed — ensure Spotify Premium and a device is active');
+  }
+}
+
+async function addToSpotifyQueue(trackUri) {
+  try {
+    await apiFetch('/api/spotify/next', 'POST', { deviceId: spotifyDeviceId, trackUri }, {}, true);
+    toast('Added to queue');
+  } catch (e) {
+    toast('Queue failed');
+  }
+}
+
+async function searchSpotify() {
+  const q = document.getElementById('spotifySearchInput').value;
+  if (!q) return;
+  try {
+    const results = await apiFetch(`/api/spotify/search?q=${encodeURIComponent(q)}&limit=8`, 'GET', null, {}, true);
+    const el = document.getElementById('spotifySearchResults');
+    el.innerHTML = results.map(t => `
+      <div class="spotify-track-row">
+        ${t.imageUrl ? `<img src="${t.imageUrl}" style="width:36px;height:36px;border-radius:4px;object-fit:cover">` : ''}
+        <div style="flex:1;margin-left:8px">
+          <div style="font-size:12px;font-weight:600">${t.title}</div>
+          <div style="font-size:11px;color:#666">${t.artist}</div>
+        </div>
+        <button onclick="addToSpotifyQueue('${t.uri}')" class="btn-sm">+ Queue</button>
+      </div>
+    `).join('');
+  } catch (e) {
+    toast('Search failed');
+  }
+}
+
+async function disconnectSpotify() {
+  await apiFetch('/api/spotify/disconnect', 'POST', {}, {}, true);
+  toast('Spotify disconnected');
+  loadSpotifyPanel();
+}
+
+// Check URL for spotify callback result
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('spotify') === 'connected') {
+  toast('✅ Spotify connected!');
+  history.replaceState({}, '', '/?mode=admin');
+} else if (urlParams.get('spotify') === 'denied') {
+  toast('Spotify connection cancelled');
+}

@@ -275,3 +275,115 @@ body {
   .genre-grid { grid-template-columns: 1fr; }
   .stat-bar { flex-direction: column; }
 }
+
+/* ── SPOTIFY INTEGRATION ── */
+.btn-spotify {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: #1DB954;
+  color: #000;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+.btn-spotify:hover { opacity: 0.9; }
+
+.btn-spotify-action {
+  width: 100%;
+  padding: 13px;
+  background: rgba(29, 185, 84, 0.15);
+  color: #1DB954;
+  border: 1.5px solid #1DB954;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-spotify-action:hover { background: rgba(29, 185, 84, 0.25); }
+
+.spotify-connect-box {
+  background: #0d1a0d;
+  border: 1px solid #1DB954;
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+}
+.spotify-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1DB954;
+  margin-bottom: 8px;
+}
+
+.spotify-connected-box { display: flex; flex-direction: column; gap: 10px; }
+
+.spotify-user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #0d1a0d;
+  border: 1px solid #1DB954;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.spotify-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1DB954;
+  flex-shrink: 0;
+}
+
+.spotify-playlist-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+}
+.spotify-playlist-row:last-child { border-bottom: none; }
+
+.spotify-track-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.04);
+  gap: 8px;
+}
+
+.spotify-device-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg2);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+.spotify-device-row:hover { border-color: rgba(255,255,255,0.15); }
+.active-device { border-color: #1DB954 !important; }
+
+.crowd-playlist-card {
+  background: #0d1a0d;
+  border: 1px solid #1DB954;
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.search-results { margin-top: 10px; }
+
+.spotify-actions { display: flex; flex-direction: column; gap: 8px; }
